@@ -47,70 +47,98 @@
 --    end
 -- end
 
+local value = _G.value or {}
+
 -- Converts value to string.
 -- @param  v  Value to convert.
 -- @return String representing value.
--- function value.tostring(v)
---    if "string" == type(v) then
---       v = string.gsub(v, "\n", "\\n")
---       if string.match(string.gsub(v, "[^'\"]", ""), '^"+$') then
---          return "'" .. v .. "'"
---       else
---          return '"' .. string.gsub(v, '"', '\\"') .. '"'
---       end
---    else
---       return "table" == type(v) and table.tostring(v) or tostring(v)
---    end
--- end
+function value.tostring(v)
+   if "string" == type(v) then
+      v = string.gsub(v, "\n", "\\n")
+      if string.match(string.gsub(v, "[^'\"]", ""), '^"+$') then
+         return "'" .. v .. "'"
+      else
+         return '"' .. string.gsub(v, '"', '\\"') .. '"'
+      end
+   else
+      return "table" == type(v) and table.tostring(v) or tostring(v)
+   end
+end
+
+local key = _G.key or {}
 
 -- Converts key to string.
 -- @param  k  Key to convert.
 -- @return String representing key.
--- function key.tostring(k)
---    if "string" == type(k) and string.match(k, "^[_%a][_%a%d]*$") then
---       return k
---    else
---       return "[" .. value.tostring(k) .. "]"
---    end
--- end
+function key.tostring(k)
+   if "string" == type(k) and string.match(k, "^[_%a][_%a%d]*$") then
+      return k
+   else
+      return "[" .. value.tostring(k) .. "]"
+   end
+end
+
+local table = _G.table or {}
 
 -- Converts table to string.
 -- @param  t  table to convert.
 -- @return String representing table.
--- function table.tostring(t)
---    local result, done = {}, {}
---    for k, v in ipairs(t) do
---       table.insert(result, value.tostring(v))
---       done[k] = true
---    end
---    for k, v in pairs(t) do
---       if not done[k] then
---          table.insert(
---             result, key.tostring(k) .. "=" .. value.tostring(v))
---       end
---    end
---    return "{" .. table.concat(result, ",") .. "}"
--- end
+function table.tostring(t)
+   local result, done = {}, {}
+   for k, v in ipairs(t) do
+      table.insert(result, value.tostring(v))
+      done[k] = true
+   end
+   for k, v in pairs(t) do
+      if not done[k] then
+         table.insert(
+            result, key.tostring(k) .. "=" .. value.tostring(v))
+      end
+   end
+   return "{" .. table.concat(result, ",") .. "}"
+end
 
-local protocol = {
-   {name = "len", type = "u8"},
-   {name = "crc", type = "u8"}
-}
+local math = _G.math or {}
+
+-- Converts number to bytes.
+function math.tobytes(n, b)
+	b = b and b - 1 or 0
+	if b >= 0 then
+		return math.floor(n / 256 ^ b) % 256, math.tobytes(n % 256 ^ b, b)
+	end
+end
 
 local C = {}
 
+-- 1-byte format.
 C.u8 = {
-   -- Codes bytes into u8.
+   -- Codes bytes.
    code = function (b)
       local v = b[C.byte]
       C.byte, C.bit = C.byte + 1, 0
       return v
    end,
 
-   -- Decodes bytes from u8.
+   -- Decodes bytes.
    decode = function (v, b)
-      b[C.byte] = v % 256
+      b[C.byte] = math.tobytes(v, 1)
       C.byte, C.bit = C.byte + 1, 0
+   end
+}
+
+-- 2-byte format.
+C.u16 = {
+   -- Codes bytes.
+   code = function (b)
+      local v = b[C.byte + 1] * 256 + b[C.byte]
+      C.byte, C.bit = C.byte + 2, 0
+      return v
+   end,
+
+   -- Decodes bytes.
+   decode = function (v, b)
+      b[C.byte + 1], b[C.byte] = math.tobytes(v, 2)
+      C.byte, C.bit = C.byte + 2, 0
    end
 }
 
@@ -119,7 +147,7 @@ function C.load(p)
    C.protocol = p
 end
 
--- Codes bytes into lua table.
+-- Codes bytes.
 function C.code(b)
    local t = {}
    C.byte, C.bit = 1, 0
@@ -129,7 +157,7 @@ function C.code(b)
    return t
 end
 
--- Decodes lua table into bytes.
+-- Decodes bytes.
 function C.decode(t)
    local b = {}
    C.byte, C.bit = 1, 0
@@ -139,21 +167,20 @@ function C.decode(t)
    return b
 end
 
-local b1 = {0, 1}
+local protocol = {
+   {name = "len", type = "u8"},
+   {name = "data", type = "u16"},
+   {name = "crc", type = "u8"}
+}
 
 C.load(protocol)
+
+local b1 = {4, 0, 0, 1}
 local t = C.code(b1)
-
-print("t")
-for k, v in pairs(t) do
-   print(k, v)
-end
-
 local b2 = C.decode(t)
 
-print("b2")
-for k, v in pairs(b2) do
-   print(k, v)
-end
+print("b1 = " .. table.tostring(b1))
+print("t = " .. table.tostring(t))
+print("b2 = " .. table.tostring(b2))
 
 return C
