@@ -110,37 +110,65 @@ end
 
 local C = {}
 
--- 1-byte format.
-C.u8 = {
+-- Number format.
+-- @todo Manage endianness.
+C.number = {
    -- Codes bytes.
    code = function (b)
-      local v = b[C.byte]
-      C.byte, C.bit = C.byte + 1, 0
+      local v = 0
+      for c = 0, C.number.size - 1 do
+         v = v + b[C.byte] * 256 ^ c
+         C.byte, C.bit = C.byte + 1, 0
+      end
       return v
    end,
 
    -- Decodes bytes.
    decode = function (v, b)
-      b[C.byte] = math.tobytes(v, 1)
-      C.byte, C.bit = C.byte + 1, 0
+      for c = 1, C.number.size do
+         b[C.byte] = v % 256
+         v = v / 256
+         C.byte, C.bit = C.byte + 1, 0
+      end
    end
 }
 
--- 2-byte format.
-C.u16 = {
+-- Enumeration format (value is a string).
+C.enum = {
    -- Codes bytes.
    code = function (b)
-      local v = b[C.byte + 1] * 256 + b[C.byte]
-      C.byte, C.bit = C.byte + 2, 0
-      return v
+      local t = getmetatable(C.enum)
+      setmetatable(C.number, t)
+      b = C.number.code(b)
+      for _, e in ipairs(t) do
+         if e.value == b then
+            return e.name
+         end
+      end
    end,
 
    -- Decodes bytes.
    decode = function (v, b)
-      b[C.byte + 1], b[C.byte] = math.tobytes(v, 2)
-      C.byte, C.bit = C.byte + 2, 0
+      local t = getmetatable(C.enum)
+      for _, e in ipairs(t) do
+         if e.name == v then
+            setmetatable(C.number, t)
+            return C.number.decode(e.value, b)
+         end
+      end
    end
 }
+
+-- Union format.
+C.union = {
+   -- Codes bytes.
+   code = function (b)
+   end,
+
+   -- Decodes bytes.
+   decode = function (v, b)
+   end
+ }
 
 -- Loads protocol.
 function C.load(p)
@@ -151,8 +179,11 @@ end
 function C.code(b)
    local t = {}
    C.byte, C.bit = 1, 0
-   for _, field in ipairs(C.protocol) do
-      t[field.name] = C[field.type].code(b)
+   for _, f in ipairs(C.protocol) do
+      local v = C[f.type] or C.protocol[f.type]
+      v.__index = v
+      setmetatable(C[v.type], v)
+      t[f.name] = C[v.type].code(b)
    end
    return t
 end
@@ -161,21 +192,40 @@ end
 function C.decode(t)
    local b = {}
    C.byte, C.bit = 1, 0
-   for _, field in ipairs(C.protocol) do
-      C[field.type].decode(t[field.name], b)
+   for _, f in ipairs(C.protocol) do
+      local v = C[f.type] or C.protocol[f.type]
+      v.__index = v
+      setmetatable(C[v.type], v)
+      C[v.type].decode(t[f.name], b)
    end
    return b
 end
 
 local protocol = {
+
    {name = "len", type = "u8"},
+   {name = "type", type = "types"},
    {name = "data", type = "u16"},
-   {name = "crc", type = "u8"}
+   {name = "crc", type = "u8"},
+
+   types = {
+      type = "enum", size = 1,
+      {name = "temp", value = 0},
+      {name = "mode", value = 1}
+   },
+
+   u8 = {
+      type = "number", size = 1
+   },
+
+   u16 = {
+      type = "number", size = 2
+   }
 }
 
 C.load(protocol)
 
-local b1 = {4, 0, 0, 1}
+local b1 = {5, 1, 0, 2, 1}
 local t = C.code(b1)
 local b2 = C.decode(t)
 
