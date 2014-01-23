@@ -98,17 +98,29 @@ function table.tostring(t)
    return "{" .. table.concat(result, ",") .. "}"
 end
 
-local math = _G.math or {}
-
--- Converts number to bytes.
-function math.tobytes(n, b)
-	b = b and b - 1 or 0
-	if b >= 0 then
-		return math.floor(n / 256 ^ b) % 256, math.tobytes(n % 256 ^ b, b)
-	end
-end
-
 local C = {}
+
+-- Bits format.
+C.bits = {
+   -- Codes bytes.
+   code = function (b)
+      local v = 0
+      for c = 0, C.number.size - 1 do
+         v = v + b[C.byte] * 256 ^ c
+         C.byte, C.bit = C.byte + 1, 0
+      end
+      return v
+   end,
+
+   -- Decodes bytes.
+   decode = function (v, b)
+      for c = 1, C.number.size do
+         b[C.byte] = v % 256
+         v = v / 256
+         C.byte, C.bit = C.byte + 1, 0
+      end
+   end
+}
 
 -- Number format.
 -- @todo Manage endianness.
@@ -116,6 +128,7 @@ C.number = {
    -- Codes bytes.
    code = function (b)
       local v = 0
+      if C.bit > 0 then C.byte, C.bit = C.byte + 1, 0 end
       for c = 0, C.number.size - 1 do
          v = v + b[C.byte] * 256 ^ c
          C.byte, C.bit = C.byte + 1, 0
